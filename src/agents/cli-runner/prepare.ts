@@ -392,7 +392,7 @@ export async function prepareCliRunContext(
         ...runConfig,
         agents: {
           ...runConfig.agents,
-          entries: { [selectedOwner]: { default: true } },
+          entries: { [selectedOwner]: {} },
         },
       } satisfies OpenClawConfig);
   const started = Date.now();

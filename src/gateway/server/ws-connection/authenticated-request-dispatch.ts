@@ -5,6 +5,7 @@ import {
   formatValidationErrors,
   validateRequestFrame,
 } from "../../../../packages/gateway-protocol/src/index.js";
+import { AgentSelectionRequiredError } from "../../../agents/agent-scope-config.js";
 import {
   createChildDiagnosticTraceContext,
   parseDiagnosticTraceparent,
@@ -155,6 +156,14 @@ export function createGatewayAuthenticatedRequestDispatcher(params: {
           context: buildRequestContext(),
         });
       } catch (err) {
+        if (err instanceof AgentSelectionRequiredError) {
+          const message =
+            err.surface === "this operation"
+              ? `Multiple agents are configured, but Gateway method "${req.method}" has no explicit owner. Set the request agentId field to one of: ${err.agentIds.join(", ")}.`
+              : err.message;
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, message));
+          return;
+        }
         // Failure diagnostics and responses belong to the same request trace as the handler.
         logGateway.error(`request handler failed: ${formatForLog(err)}`);
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
