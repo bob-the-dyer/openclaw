@@ -303,24 +303,43 @@ type ChannelLogoutContext<ResolvedAccount = unknown> = {
   log?: ChannelLogSink;
 };
 
-export type ChannelGatewayAdapter<ResolvedAccount = unknown> = {
-  startAccount?: (ctx: ChannelGatewayContext<ResolvedAccount>) => Promise<unknown>;
-  stopAccount?: (ctx: ChannelGatewayContext<ResolvedAccount>) => Promise<void>;
-  /** Keep gateway auth bypass resolution mirrored through a lightweight top-level `gateway-auth-api.ts` artifact. */
-  resolveGatewayAuthBypassPaths?: (params: { cfg: OpenClawConfig }) => string[];
-  loginWithQrStart?: (params: {
-    accountId?: string;
-    force?: boolean;
-    timeoutMs?: number;
-    verbose?: boolean;
-  }) => Promise<ChannelLoginWithQrStartResult>;
-  loginWithQrWait?: (params: {
-    accountId?: string;
-    timeoutMs?: number;
-    currentQrDataUrl?: string;
-  }) => Promise<ChannelLoginWithQrWaitResult>;
-  logoutAccount?: (ctx: ChannelLogoutContext<ResolvedAccount>) => Promise<ChannelLogoutResult>;
+/** Exact terminal sentinel: return this plain object shape without extra keys. */
+export type ChannelGatewayStartResult = {
+  outcome: "terminal";
 };
+
+type ChannelGatewayStartAdapter<ResolvedAccount> =
+  | {
+      /** Legacy adapters retain their arbitrary resolved-value contract. */
+      supportsTerminalStartResult?: false;
+      startAccount?: (ctx: ChannelGatewayContext<ResolvedAccount>) => Promise<unknown>;
+    }
+  | {
+      /** Opt into the terminal result contract; unopted adapters keep legacy restart behavior. */
+      supportsTerminalStartResult: true;
+      startAccount: (
+        ctx: ChannelGatewayContext<ResolvedAccount>,
+      ) => Promise<void | ChannelGatewayStartResult>;
+    };
+
+export type ChannelGatewayAdapter<ResolvedAccount = unknown> =
+  ChannelGatewayStartAdapter<ResolvedAccount> & {
+    stopAccount?: (ctx: ChannelGatewayContext<ResolvedAccount>) => Promise<void>;
+    /** Keep gateway auth bypass resolution mirrored through a lightweight top-level `gateway-auth-api.ts` artifact. */
+    resolveGatewayAuthBypassPaths?: (params: { cfg: OpenClawConfig }) => string[];
+    loginWithQrStart?: (params: {
+      accountId?: string;
+      force?: boolean;
+      timeoutMs?: number;
+      verbose?: boolean;
+    }) => Promise<ChannelLoginWithQrStartResult>;
+    loginWithQrWait?: (params: {
+      accountId?: string;
+      timeoutMs?: number;
+      currentQrDataUrl?: string;
+    }) => Promise<ChannelLoginWithQrWaitResult>;
+    logoutAccount?: (ctx: ChannelLogoutContext<ResolvedAccount>) => Promise<ChannelLogoutResult>;
+  };
 
 export type ChannelAuthAdapter = {
   login?: (params: {

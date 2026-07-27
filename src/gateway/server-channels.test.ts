@@ -106,6 +106,7 @@ function createTestPlugin(params?: {
   id?: ChannelId;
   order?: number;
   account?: TestAccount;
+  supportsTerminalStartResult?: true;
   startAccount?: NonNullable<ChannelPlugin<TestAccount>["gateway"]>["startAccount"];
   stopAccount?: NonNullable<ChannelPlugin<TestAccount>["gateway"]>["stopAccount"];
   listAccountIds?: ChannelPlugin<TestAccount>["config"]["listAccountIds"];
@@ -140,8 +141,12 @@ function createTestPlugin(params?: {
         configured: resolved.configured !== false,
       }));
   }
-  const gateway: NonNullable<ChannelPlugin<TestAccount>["gateway"]> = {};
-  if (params?.startAccount) {
+  const gateway = (
+    params?.supportsTerminalStartResult
+      ? { supportsTerminalStartResult: true, startAccount: params.startAccount }
+      : {}
+  ) as NonNullable<ChannelPlugin<TestAccount>["gateway"]>;
+  if (params?.startAccount && !params.supportsTerminalStartResult) {
     gateway.startAccount = params.startAccount;
   }
   if (params?.stopAccount) {
@@ -865,6 +870,61 @@ describe("server-channels auto restart", () => {
     expect(startAccount).toHaveBeenCalledTimes(1);
     const snapshot = manager.getRuntimeSnapshot();
     expect(snapshot.channelAccounts.discord?.[DEFAULT_ACCOUNT_ID]?.terminalDisconnect).toBe(true);
+  });
+
+  it("does not auto-restart a typed terminal channel result", async () => {
+    const startAccount = vi.fn(
+      async ({ setStatus, accountId }: ChannelGatewayContext<TestAccount>) => {
+        setStatus({
+          accountId,
+          healthState: "logged-out",
+          lastError: "relink required",
+        });
+        return { outcome: "terminal" as const };
+      },
+    );
+    installTestRegistry(createTestPlugin({ supportsTerminalStartResult: true, startAccount }));
+    const manager = createManager();
+
+    await manager.startChannels();
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(startAccount).toHaveBeenCalledTimes(1);
+    expect(hoisted.sleepWithAbort).not.toHaveBeenCalled();
+    expect(
+      manager.getRuntimeSnapshot().channelAccounts.discord?.[DEFAULT_ACCOUNT_ID],
+    ).toMatchObject({
+      running: false,
+      restartPending: false,
+      reconnectAttempts: 0,
+      healthState: "logged-out",
+      lastError: "relink required",
+    });
+  });
+
+  it.each([
+    ["the exact terminal object without opt-in", { outcome: "terminal" }],
+    ["extra fields", { outcome: "terminal", details: "legacy value" }],
+    ["an inherited discriminator", Object.create({ outcome: "terminal" })],
+    [
+      "a class instance",
+      new (class LegacyResult {
+        outcome = "terminal";
+      })(),
+    ],
+  ])("restarts after a legacy result with %s", async (_description, result) => {
+    const startAccount = vi.fn(async () => result);
+    installTestRegistry(createTestPlugin({ startAccount }));
+    const manager = createManager();
+
+    await manager.startChannels();
+    await advanceTimersUntil(
+      () => startAccount.mock.calls.length >= 2,
+      "expected a legacy result collision to restart",
+      { stepMs: 10, maxMs: 500 },
+    );
+
+    expect(startAccount).toHaveBeenCalledTimes(2);
   });
 
   it("consumes rejected stop tasks during manual abort", async () => {

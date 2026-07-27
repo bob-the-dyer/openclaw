@@ -213,6 +213,22 @@ resolved config unchanged, stopping one account settles only that account's
 monitor and drain, and a fresh monitor recovers that account's rows exactly
 once. If any guarantee cannot be proved, omit the flag.
 
+#### Terminal account exits
+
+`gateway.startAccount` normally runs until its abort signal fires. Existing
+adapters may resolve arbitrary values, and those exits retain the Gateway's
+restart policy. To use terminal results, set
+`gateway.supportsTerminalStartResult: true`; this narrows `startAccount` to the
+typed `void | ChannelGatewayStartResult` contract.
+
+When an opted-in account reaches a state that requires operator action and must
+not restart, set an actionable status and return `{ outcome: "terminal" }`. The
+Gateway preserves that status, marks the account stopped with
+`restartPending: false`, and does not schedule a replacement. Return exactly
+that plain object literal: no extra keys, inherited discriminator, array, or
+class instance is accepted. Unopted adapters always keep legacy restart
+behavior, including when they resolve that exact object.
+
 ### Typing indicators
 
 If your channel supports typing indicators outside inbound replies, expose

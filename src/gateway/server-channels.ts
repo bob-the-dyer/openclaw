@@ -5,6 +5,7 @@ import { getCredentialUnavailableDiagnostics } from "../channels/account-snapsho
 import { isChannelIngressUnavailableError } from "../channels/message/ingress-unavailable.js";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { type ChannelId, getChannelPlugin, listChannelPlugins } from "../channels/plugins/index.js";
+import type { ChannelGatewayStartResult } from "../channels/plugins/types.adapters.js";
 import type { ChannelAccountSnapshot } from "../channels/plugins/types.public.js";
 import {
   applyChannelAccountState,
@@ -63,6 +64,25 @@ const CHANNEL_STARTUP_CONCURRENCY = 4;
 // Private context key carried through the generic Plugin SDK registry. This is
 // not a new public capability surface; only the host installs its authority.
 const CHANNEL_APPROVAL_GATEWAY_RUNTIME_CONTEXT_CAPABILITY = "approval.gateway";
+
+function isTerminalChannelStartResult(result: unknown): result is ChannelGatewayStartResult {
+  if (typeof result !== "object" || result === null) {
+    return false;
+  }
+  try {
+    const keys = Reflect.ownKeys(result);
+    return (
+      Object.getPrototypeOf(result) === Object.prototype &&
+      keys.length === 1 &&
+      keys[0] === "outcome" &&
+      (result as { outcome?: unknown }).outcome === "terminal"
+    );
+  } catch {
+    // Legacy adapters may resolve arbitrary values, including hostile proxies.
+    return false;
+  }
+}
+
 function waitForChannelStartupHandoff(): Promise<void> {
   return new Promise((resolve) => {
     const handle = setImmediate(resolve);
@@ -460,6 +480,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     if (!startAccount) {
       return;
     }
+    const supportsTerminalStartResult = plugin.gateway?.supportsTerminalStartResult === true;
     const { preserveRestartAttempts = false, preserveManualStop = false } = optsValue;
     const cfg = getRuntimeConfig();
     resetDirectoryCache({ channel: channelId, accountId });
@@ -702,6 +723,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             log.error?.(`[${id}] native approval bootstrap failed: ${formatErrorMessage(error)}`);
           }
           let channelRunDurationMs: number | undefined;
+          let terminalStartResult = false;
           setRuntime(channelId, id, {
             accountId: id,
             enabled: true,
@@ -723,7 +745,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
               await waitForChannelStartupHandoff();
             }
             if (abort.signal.aborted || manuallyStopped.has(rKey)) {
-              return;
+              return undefined;
             }
             const gatewayApprovalRuntime = opts.getNativeApprovalRuntime?.();
             if (channelRuntimeForTask && gatewayApprovalRuntime) {
@@ -790,15 +812,19 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                 : runStartAccount();
             });
             if (!startAccountTask) {
-              return;
+              return undefined;
             }
-            await startAccountTask;
+            return await startAccountTask;
           });
           // Recovery can replace a timed-out task before the old promise settles.
           // Only the task that still owns the store slot may write lifecycle state.
           const trackedPromise = task
-            .then(() => {
+            .then((result) => {
               if (abort.signal.aborted || manuallyStopped.has(rKey) || !isCurrentTask()) {
+                return;
+              }
+              if (supportsTerminalStartResult && isTerminalChannelStartResult(result)) {
+                terminalStartResult = true;
                 return;
               }
               const message = "channel exited without an error";
@@ -838,6 +864,18 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
               if (manuallyStopped.has(rKey)) {
                 recoveryStopTimedOut.delete(rKey);
                 recoveryStartRequested.delete(rKey);
+                return;
+              }
+              if (terminalStartResult) {
+                recoveryStopTimedOut.delete(rKey);
+                recoveryStartRequested.delete(rKey);
+                restarts.delete(rKey);
+                setRuntime(channelId, id, {
+                  accountId: id,
+                  restartPending: false,
+                  reconnectAttempts: 0,
+                });
+                log.info?.(`[${id}] auto-restart skipped, terminal channel result`);
                 return;
               }
               if (getRuntime(channelId, id).terminalDisconnect) {
