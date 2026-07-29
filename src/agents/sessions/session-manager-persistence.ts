@@ -128,17 +128,24 @@ export class SessionManagerPersistence extends SessionManagerCore {
     return removedEntries.length;
   }
 
-  protected persistRecord(entry: unknown, options?: AppendPersistenceOptions): void {
+  protected persistRecord(
+    entry: unknown,
+    options?: AppendPersistenceOptions,
+  ): string | null | undefined {
     if (this.persistenceTarget) {
-      this.persistSqliteRecord(entry, options);
+      return this.persistSqliteRecord(entry, options);
     }
+    return undefined;
   }
 
-  persist(entry: SessionEntry, options?: AppendPersistenceOptions): void {
-    this.persistRecord(entry, options);
+  persist(entry: SessionEntry, options?: AppendPersistenceOptions): string | null | undefined {
+    return this.persistRecord(entry, options);
   }
 
-  private persistSqliteRecord(entry: unknown, options?: AppendPersistenceOptions): void {
+  private persistSqliteRecord(
+    entry: unknown,
+    options?: AppendPersistenceOptions,
+  ): string | null | undefined {
     if (!this.persistenceTarget) {
       return;
     }
@@ -174,6 +181,7 @@ export class SessionManagerPersistence extends SessionManagerCore {
       message: entry.message,
       now: Date.parse(entry.timestamp),
       parentId: entry.parentId,
+      ...(options?.appendIntent === "active-branch" ? { appendIntent: options.appendIntent } : {}),
     } satisfies Parameters<typeof appendTranscriptMessageSync>[1];
     const result = appendTranscriptMessageSync(scope, appendOptions);
     if (!result) {
@@ -188,6 +196,10 @@ export class SessionManagerPersistence extends SessionManagerCore {
     ) {
       throw new Error(`Session transcript append was not persisted: ${entry.id}`);
     }
+    if (result.effectiveParentId === undefined) {
+      throw new Error(`Session transcript append parent was not returned: ${entry.id}`);
+    }
+    return result.effectiveParentId;
   }
 
   mergePromptReleasedSessionEntries(
