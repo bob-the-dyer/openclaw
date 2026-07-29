@@ -632,14 +632,6 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
       thinkingLevel,
       fastMode,
       configBusy,
-      configConnected: runtimeState.connected,
-      configLoading: runtimeState.configLoading,
-      configSaving: runtimeState.configSaving,
-      configApplying: runtimeState.configApplying,
-      configUpdating: update.updateRunning || update.updateReconciliationPending,
-      configNeedsApply: runtimeState.configNeedsApply,
-      configRawDraftPending: runtimeState.configFormMode === "raw" && runtimeState.configFormDirty,
-      configAutoSaveStatus: runtimeState.configAutoSaveStatus,
       unconfiguredProviders: buildUnconfiguredProviderOptions(
         data.catalogModels,
         configuredProviderIds,
@@ -709,9 +701,6 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
         runtimeConfig.patchForm(["agents", "defaults", "thinkingDefault"], level),
       onFastModeChange: (mode: FastMode) =>
         runtimeConfig.patchForm(["agents", "defaults", "fastModeDefault"], mode),
-      onApplyConfig: () => void runtimeConfig.apply(),
-      onRetrySaveConfig: () => void runtimeConfig.save(),
-      onDiscardConfig: () => void runtimeConfig.discardDraft(),
     });
     return html`
       <section class="content-header">
