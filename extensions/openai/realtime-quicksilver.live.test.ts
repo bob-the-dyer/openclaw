@@ -4,6 +4,7 @@ import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import WebSocket, { type RawData } from "ws";
 import { resolveCodexAuthIdentity } from "./openai-chatgpt-auth-identity.js";
+import { OpenAIQuicksilverVoiceBridge } from "./realtime-quicksilver-bridge.js";
 import {
   buildOpenAIQuicksilverSession,
   createOpenAIQuicksilverCall,
@@ -139,6 +140,36 @@ async function resolveLiveOAuthProfile(): Promise<
     credential.accountId ?? resolveCodexAuthIdentity({ accessToken: credential.access }).accountId;
   return accountId ? { type: "oauth", token: credential.access, accountId } : undefined;
 }
+
+describeLive("GPT-Live Platform WebSocket", () => {
+  it(
+    "opens a Frameless Bidi session without a browser or WebRTC",
+    async ({ skip }) => {
+      const apiKey = process.env.OPENAI_API_KEY?.trim();
+      if (!apiKey) {
+        skip("No OpenAI Platform API key is available");
+        return;
+      }
+      const bridge = new OpenAIQuicksilverVoiceBridge({
+        providerConfig: {},
+        model: "gpt-live-1-codex",
+        voice: "marin",
+        instructions: "Keep this transport verification session silent.",
+        audioFormat: { encoding: "pcm16", sampleRateHz: 24000, channels: 1 },
+        resolveAuth: async () => ({ type: "api-key", token: apiKey }),
+        onAudio: () => {},
+        onClearAudio: () => {},
+      });
+      try {
+        await bridge.connect();
+        expect(bridge.isConnected()).toBe(true);
+      } finally {
+        bridge.close();
+      }
+    },
+    LIVE_TIMEOUT_MS,
+  );
+});
 
 describeLive("GPT-Live OAuth WebRTC", () => {
   it(
